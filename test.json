@@ -1,0 +1,47 @@
+[
+    {
+        "lowervx": 0,
+        "uppervx": 7,
+        "lowervy": 0,
+        "uppervy": 0,
+        "xsteps": 35,
+        "ysteps": 100,
+        "settle": 0.5,
+        "data_rate": 100,
+        "refresh": 0.5,
+        "log": true,
+        "make_heatmap": true,
+        "filename": "settle-test-0.5",
+        "groupname": ""
+    },
+    {
+        "lowervx": 0,
+        "uppervx": 7,
+        "lowervy": 0,
+        "uppervy": 0,
+        "xsteps": 35,
+        "ysteps": 100,
+        "settle": 1,
+        "data_rate": 100,
+        "refresh": 0.5,
+        "log": true,
+        "make_heatmap": true,
+        "filename": "settle-test-1.0",
+        "groupname": ""
+    },
+    {
+        "lowervx": 0,
+        "uppervx": 7,
+        "lowervy": 0,
+        "uppervy": 0,
+        "xsteps": 35,
+        "ysteps": 100,
+        "settle": 1.5,
+        "data_rate": 100,
+        "refresh": 0.5,
+        "log": true,
+        "make_heatmap": true,
+        "filename": "settle-test-1.5",
+        "groupname": ""
+    }
+]
