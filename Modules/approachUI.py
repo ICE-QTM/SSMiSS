@@ -2,7 +2,7 @@
 """
 SSMiSS module to perform approaches.
 
-Version 1.0 (2025/04/03)
+Version 1.2.1 (2025/05/21)
 Kylian van Dam - Master Student at ICE/QTM
 University of Twente
 """
@@ -13,6 +13,7 @@ from pyqtgraph.Qt.QtCore import QThread, QTimer, Qt
 from pyqtgraph.Qt.QtWidgets import QVBoxLayout, QHBoxLayout, QLabel, QCheckBox
 import threading
 from time import sleep
+from datetime import datetime
 
 from Modules.TabLayout import TabLayout
 from Instruments.NIpci6036E import NIpci6036E
@@ -31,13 +32,28 @@ class approachVars():
         self.frequencies = [200, 50]                    # (Hz) Lists approach frequency during approach stages
         self.rate = 10                                  # (Hz) Data query rate
         self.consec_req = 3                             # Defines how many times in a row the thershold must be met
-
+        self.log = False
+        self.filename = "Data/approaches.tdms"
+    
+    # Used to mass-set all variables from a dict
+    def set_all(self, approach_stages, threshold, stepcounts, voltages, frequencies, rate, consec_req, log):
+        self.approach_stages = approach_stages
+        self.threshold = threshold
+        self.stepcounts = stepcounts
+        self.voltages = voltages
+        self.frequencies = frequencies
+        self.rate = rate
+        self.consec_req = consec_req
+        self.log = log
+        
+    def createGroupName():
+        return datetime.now().strftime('%Y%m%d-%H%M%S')
 
 #%% Classes
 
 # Class that takes care of approaches. Adds itself to a QStackedLayout, and creates accompanying PushButton tab.
 class approachUI(TabLayout, QVBoxLayout):
-    def __init__(self, parent, anc, anc_z, sr, daq, channel):
+    def __init__(self, parent, anc, anc_z, sr, daq, channel, advance):
         # Ensure this is actually a QVBoxLayout
         super(approachUI, self).__init__(parent)
         self.makeTab('Approach')
@@ -51,6 +67,7 @@ class approachUI(TabLayout, QVBoxLayout):
         self.sr = sr
         self.daq = daq
         self.chan = channel
+        self.advance = advance
         self.__dumpData()
         
         # Set up a data refresh timer
@@ -64,62 +81,65 @@ class approachUI(TabLayout, QVBoxLayout):
         # Make a bar for info
         info = QHBoxLayout(); self.addLayout(info)
         # Add widget for starting approaches
-        self.startButton = addQBtn(info, 'Start approach', self.__startApproach)
+        self.startButton = addQBtn(info, 'Start approach', self.startApproach, "confirm")
         self.startButton.setFixedSize(140, 23)
         # Add a panic button
-        self.closeButton = addQBtn(info, 'Stop approach!', (lambda: self.approach.endApproachStage(True)))
+        self.closeButton = addQBtn(info, 'Stop approach!', (lambda: self.approach.endApproachStage(True)), "quit")
         self.closeButton.setFixedSize(140, 23)
         # Add a label (textbox) for displaying *stuff*
         self.doc = QLabel('No active approach.')
         self.doc.setAlignment(Qt.AlignHCenter)
         info.addWidget(self.doc)
         
-        self.__makeMenu()
-        self.__makeGraphs()
+        approachUI.makeMenu(self, self.av, 0)
+        self.__makeGraphs(100)
 
     # Extension of __init__
-    def __makeMenu(self):
+    def makeMenu(parent, av, stretchFactor):
+        menu = QVBoxLayout()
+        parent.addLayout(menu, stretchFactor)
+        
         # Add a horizontal bar, for stage 1 related text boxes
         stage1 = QHBoxLayout()
-        self.addLayout(stage1)
+        menu.addLayout(stage1)
         # Add text boxes and labels
         stage1.addWidget(QLabel("Stage 1: "))
-        self.step1box = addVdtQLineEdit(stage1, "Steps", 1, 10000, self.av.stepcounts[0], False)
-        self.volt1box = addVdtQLineEdit(stage1, "Voltage", 0, 70, self.av.voltages[0], False)
-        self.freq1box = addVdtQLineEdit(stage1, "Frequency", 1, 8000, self.av.frequencies[0], False)
-        self.threshold1box = addVdtQLineEdit(stage1, "Threshold", None, None, self.av.threshold[0], scientific=True)
+        parent.step1box = addVdtQLineEdit(stage1, "Steps", 1, 10000, av.stepcounts[0], False)
+        parent.volt1box = addVdtQLineEdit(stage1, "Voltage", 0, 70, av.voltages[0], False)
+        parent.freq1box = addVdtQLineEdit(stage1, "Frequency", 1, 8000, av.frequencies[0], False)
+        parent.threshold1box = addVdtQLineEdit(stage1, "Threshold", None, None, av.threshold[0], scientific=True)
         
         # Add a horizontal bar, for stage 1 related text boxes
         stage2 = QHBoxLayout()
-        self.addLayout(stage2)
+        menu.addLayout(stage2)
         # Add text boxes and labels
         stage2.addWidget(QLabel("Stage 2: "))
-        self.step2box = addVdtQLineEdit(stage2, "Steps", 1, 10000, self.av.stepcounts[1], False)
-        self.volt2box = addVdtQLineEdit(stage2, "Voltage", 0, 70, self.av.voltages[1], False)
-        self.freq2box = addVdtQLineEdit(stage2, "Frequency", 1, 8000, self.av.frequencies[1], False)
-        self.threshold2box = addVdtQLineEdit(stage2, "Threshold", None, None, self.av.threshold[1], scientific=True)
+        parent.step2box = addVdtQLineEdit(stage2, "Steps", 1, 10000, av.stepcounts[1], False)
+        parent.volt2box = addVdtQLineEdit(stage2, "Voltage", 0, 70, av.voltages[1], False)
+        parent.freq2box = addVdtQLineEdit(stage2, "Frequency", 1, 8000, av.frequencies[1], False)
+        parent.threshold2box = addVdtQLineEdit(stage2, "Threshold", None, None, av.threshold[1], scientific=True)
         
         # Add another horizontal bar, for general text boxes
         params = QHBoxLayout()
-        self.addLayout(params)
+        menu.addLayout(params)
         # Add text boxes and labels
-        self.stagebox = QCheckBox('Perform 2nd stage')
-        params.addWidget(self.stagebox)
-        self.ratebox = addVdtQLineEdit(params, "Data rate (Hz)", 1, 10000, self.av.rate)
-        self.consecbox = addVdtQLineEdit(params, "Consecutive threshold exceedings", 1, None, self.av.consec_req, False)
+        parent.stagebox = QCheckBox('Perform 2nd stage'); params.addWidget(parent.stagebox)
+        parent.logbox = QCheckBox('Log to file'); params.addWidget(parent.logbox)
+        parent.ratebox = addVdtQLineEdit(params, "Data rate (Hz)", 1, 10000, av.rate)
+        parent.consecbox = addVdtQLineEdit(params, "Consecutive threshold exceedings", 1, None, av.consec_req, False)
 
     # Extension of __init__
-    def __makeGraphs(self):
+    def __makeGraphs(self, stretchFactor):
         # Set graphical window for putting graphs in
         graphs = pg.GraphicsLayoutWidget()
-        self.addWidget(graphs)
+        self.addWidget(graphs, stretchFactor)
         
         # Enable antialiasing for prettier plots
         pg.setConfigOptions(antialias=True)
         
         # Prepare actual plots
         self.p1 = graphs.addPlot(title="Strain gauge voltage", row = 0, col = 0)
-        self.p1.setLabel('bottom', "Sample #"); self.p1.setLabel('left', "Strain")
+        self.p1.setLabel('bottom', "Sample #"); self.p1.setLabel('left', "Strain (mV)")
         self.p2 = graphs.addPlot(title="dV/dT", row = 0, col = 1)
         self.p2.setLabel('bottom', "Sample #"); self.p2.setLabel('left', "Derivative of strain")
         
@@ -178,12 +198,17 @@ class approachUI(TabLayout, QVBoxLayout):
             self.__checkThreshold()
 
     # Start the approach
-    def __startApproach(self):
+    def startApproach(self, settings=None):
         self.parent.disableTabs(self.tabs)              # Prevent leaving this module
         self.startButton.setEnabled(False)              # Prevent starting another approach
         
         self.doc.setText('Preaparing approach...')
-        self.__snapshot()
+        # If this is a single approach
+        if settings == None:
+            # Find settings from current snapshot
+            settings = approachUI.snapshot(self)
+        # Update variables and settings according to settings information
+        self.av.set_all(**settings)
         
         # Instrument prep
         self.anc.write_mode(self.z, 'stp')
@@ -197,6 +222,8 @@ class approachUI(TabLayout, QVBoxLayout):
         # Make a read task
         self.read_task = self.daq.make_read_task('read', self.chan)
         NIpci6036E.set_continuous_hardware_clock(self.read_task, 5 * self.av.rate)
+        if self.av.log:
+            NIpci6036E.set_log(self.read_task, self.av.filename, approachVars.createGroupName())
         
         # Start doing stuff
         self.read_task.start()
@@ -208,22 +235,25 @@ class approachUI(TabLayout, QVBoxLayout):
         self.data = np.empty((2, 0))
         self.der_arr = np.array([])
     
-    # Make a snapshot of all values currently on screen, and put them in the approachVars object
-    def __snapshot(self):
-        if self.stagebox.isChecked():
-            self.av.threshold = [float(self.threshold1box.text()), float(self.threshold2box.text())]
-            self.av.stepcounts = [int(self.step1box.text()), int(self.step2box.text())]
-            self.av.voltages = [int(self.volt1box.text()), int(self.volt2box.text())]
-            self.av.frequencies = [int(self.freq1box.text()), int(self.freq2box.text())]
-            self.av.approach_stages = 2
+    # Make a dictionary of variables by taking a snapshot of current values in widget
+    def snapshot(layout):
+        values = {}
+        if layout.stagebox.isChecked():
+            values["threshold"] = [float(layout.threshold1box.text()), float(layout.threshold2box.text())]
+            values["stepcounts"] = [int(layout.step1box.text()), int(layout.step2box.text())]
+            values["voltages"] = [int(layout.volt1box.text()), int(layout.volt2box.text())]
+            values["frequencies"] = [int(layout.freq1box.text()), int(layout.freq2box.text())]
+            values["approach_stages"] = 2
         else:
-            self.av.threshold = [float(self.threshold1box.text())]
-            self.av.stepcounts = [int(self.step1box.text())]
-            self.av.voltages = [int(self.volt1box.text())]
-            self.av.frequencies = [int(self.freq1box.text())]
-            self.av.approach_stages = 1
-        self.av.rate = float(self.ratebox.text())
-        self.av.consec_req = int(self.consecbox.text())
+            values["threshold"] = [float(layout.threshold1box.text())]
+            values["stepcounts"] = [int(layout.step1box.text())]
+            values["voltages"] = [int(layout.volt1box.text())]
+            values["frequencies"] = [int(layout.freq1box.text())]
+            values["approach_stages"] = 1
+        values["rate"] = float(layout.ratebox.text())
+        values["consec_req"] = int(layout.consecbox.text())
+        values["log"] = layout.logbox.isChecked()
+        return values
     
     # Forcefully stop approach movement
     def stopAll(self):
@@ -296,12 +326,13 @@ class ApproachThread(QThread):
             if hasattr(self.win, 'read_task'):
                 NIpci6036E.close_task(self.win.read_task)
             
+            # Allow starting new things again
+            self.win.startButton.setEnabled(True)
+            self.win.parent.enableTabs()
+            
             # If forcibly ended
             if end_all:
                 self.win.doc.setText('Approach stopped')
             else:
                 self.win.doc.setText('Approach complete')
-            
-            # Allow starting new things again
-            self.win.startButton.setEnabled(True)
-            self.win.parent.enableTabs()
+                self.win.advance.emit()

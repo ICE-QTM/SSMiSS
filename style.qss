@@ -1,0 +1,19 @@
+/*
+ * Stylesheet of the Scanning Squid Microscopy Software Suite.
+ *
+ * Version 1.0 (2025/04/29)
+ * Kylian van Dam - Master Student at ICE/QTM
+ * University of Twente
+ */
+
+QConfirmButton {
+    background-color : green
+}
+
+QQuitButton {
+    background-color : red
+}
+
+QPushButton {
+    font-size: 13px
+}

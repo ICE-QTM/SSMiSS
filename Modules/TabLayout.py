@@ -2,7 +2,7 @@
 """
 SSMiSS mixin class serving as a base for all modules.
 
-Version 1.0 (2025/04/03)
+Version 1.1 (2025/04/29)
 Kylian van Dam - PMaster Student at ICE/QTM
 University of Twente
 """
@@ -18,7 +18,7 @@ class TabLayout():
         
         # make a TabWidget
         self.parent = parent
-        self.widget = TabWidget(self.parent.getStack(), self)
+        self.widget = TabWidget(self.parent, self)
     
     # Create tabs. For creating multiple at once, pass lists to name and fun
     def makeTab(self, name=None, fun=None):
@@ -38,22 +38,26 @@ class TabLayout():
 # Widget for implementing custom tabs, intended for slotting into a parent's QStackedLayout
 class TabWidget(QWidget):
     # Set own layout and add self to parent's layout
-    def __init__(self, parent_stack, layout):
+    def __init__(self, parent, layout):
         super(TabWidget, self).__init__()
         
         self.layout = layout; self.setLayout(self.layout)
-        self.parent_stack = parent_stack; self.parent_stack.addWidget(self)
+        self.parent = parent;
+        self.parent_stack = self.parent.getStack(); self.parent_stack.addWidget(self)
     
     # Add a tab in tab_layout to switch the QStackedLayout to me
     def addTab(self, tab_layout, name='TabWidget', fun=None):
         tabbtn = QPushButton(name)
         tab_layout.addWidget(tabbtn)
+        if tab_layout.count() == 1:
+            self.parent.setActive(tabbtn)
         if fun:
-            tabbtn.released.connect(fun)
+            tabbtn.released.connect(lambda: fun(tabbtn))
         else:
-            tabbtn.released.connect(self.switchTab)
+            tabbtn.released.connect(lambda: self.switchTab(tabbtn))
         return tabbtn
 
     # Switch the QStackedLayout to me
-    def switchTab(self):
+    def switchTab(self, btn):
+        self.parent.setActive(btn)
         self.parent_stack.setCurrentWidget(self)

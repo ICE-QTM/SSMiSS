@@ -2,19 +2,16 @@
 """
 SSMiSS module to perform scans.
 
-Version 1.0.1 (2025/04/07)
+Version 1.2.1 (2025/05/21)
 Kylian van Dam - Master Student at ICE/QTM
 University of Twente
 """
 
 import numpy as np
 import pyqtgraph as pg
-from pyqtgraph.Qt.QtCore import QThread, QTimer, Qt, QSize
-from pyqtgraph.Qt.QtWidgets import QCheckBox, QVBoxLayout, QHBoxLayout, QWidget, QLabel, QFileDialog, QStackedLayout
-from pyqtgraph.Qt.QtGui import QIcon
-import os
+from pyqtgraph.Qt.QtCore import QThread, QTimer, Qt
+from pyqtgraph.Qt.QtWidgets import QCheckBox, QVBoxLayout, QHBoxLayout, QLabel
 import threading
-import json
 from datetime import datetime
 
 from Modules.TabLayout import TabLayout
@@ -44,6 +41,7 @@ class scanVars():
         self.upperV = 7                                             # Global scanner voltage limiter (V) (not changeable at runtime)
         self.filebase = datetime.now().strftime('%Y%m%d-%H%M%S_')   # Start of all filenames (not changeable at runtime)
         self.folder = folder                                        # Folder to put the files into (not changeable at runtime)
+        self.archiveFile = "Data/scans.csv"                         # Location of the archive file
 
     # Construct how steps are taken
     def stepdata(self):
@@ -57,7 +55,7 @@ class scanVars():
     def createFileName(self):
         return 'Data/' + self.folder + '/' + self.filebase + self.filename
     
-    # Used to mass-set all variables from a dict, for pre-programmed scans
+    # Used to mass-set all variables from a dict
     def set_all(self, lowervx, uppervx, lowervy, uppervy, xsteps, ysteps, settle, data_rate, refresh, log, make_heatmap, filename, groupname):
         self.lowervx = lowervx
         self.uppervx = uppervx
@@ -72,16 +70,22 @@ class scanVars():
         self.make_heatmap = make_heatmap
         self.filename = filename
         self.groupname = groupname
+    
+    # Write all used settings to a general archiving file
+    def archive(self):
+        v = [self.groupname, self.filebase[:-1], self.lowervx, self.uppervx, self.xsteps, self.lowervy, self.uppervy, self.ysteps, self.settle, self.createFileName()]
+        string = ', '.join([str(x) for x in v]) + '\n'
+        with open(self.archiveFile, 'a') as f: f.write(string)
 
 
 #%% Classes
 
 # Class that takes care of scans. Adds itself to a QStackedLayout, and creates accompanying PushButton tabs.
 class scanUI(TabLayout, QVBoxLayout):
-    def __init__(self, parent, daq, meas_list, write_list, folder):
+    def __init__(self, parent, daq, meas_list, write_list, folder, advance):
         # Ensure this is actually a QVBoxLayout
         super(scanUI, self).__init__(parent)
-        self.makeTab(['Single Line Scan', 'Programmed Line Scan'], [self.__switchSingle, self.__switchProgrammed])
+        self.makeTab('Line Scan')
         
         # Create a variable storage object
         self.sv = scanVars(folder)
@@ -90,7 +94,7 @@ class scanUI(TabLayout, QVBoxLayout):
         self.daq = daq
         self.write_list = write_list
         self.meas_list = meas_list
-        self.program_i = -1                     # Keep track of which program we're currently running
+        self.advance = advance
         self.data = np.empty((len(self.meas_list), 0))
         
         # Create a thread that handles a full line scan
@@ -105,112 +109,76 @@ class scanUI(TabLayout, QVBoxLayout):
         # Make a bar for info
         info = QHBoxLayout(); self.addLayout(info)
         # Add widget for starting line scans
-        self.startButton = addQBtn(info, 'Start scan', self.__startProgram)
+        self.startButton = addQBtn(info, 'Start scan', self.__startProgram, 'confirm')
         self.startButton.setFixedSize(140, 23)
         # Add a panic button
-        self.closeButton = addQBtn(info, 'Stop scan!', self.stopAll)
+        self.closeButton = addQBtn(info, 'Stop scan!', self.stopAll, 'quit')
         self.closeButton.setFixedSize(140, 23)
         # Add a label (textbox) for displaying *stuff*
         self.doc = QLabel('No active scan.')
         self.doc.setAlignment(Qt.AlignHCenter)
         info.addWidget(self.doc)
         
-        # Create a stacked layout for menus
-        self.menu = QStackedLayout()
-        self.addLayout(self.menu)
-        
         #Make scanning menus
-        self.__makeSingleScanMenu()
-        self.__makeProgrammedScanMenu()
-        self.__makeGraphs()
+        scanUI.makeMenu(self, self.sv, 0)
+        self.__makeGraphs(100)
 
     # Extension of __init__ that creates the menu for single scans in the QStackedLayout
-    def __makeSingleScanMenu(self):
-        singleScan = QVBoxLayout()
-        self.singleWidget = QWidget(); self.singleWidget.setLayout(singleScan); self.menu.addWidget(self.singleWidget)
+    def makeMenu(parent, sv, stretchFactor):
+        layout = QVBoxLayout()
+        parent.addLayout(layout, stretchFactor)
         
         # Add a horizontal bar, for logging settings
         settings = QHBoxLayout()
-        singleScan.addLayout(settings)
+        layout.addLayout(settings)
         # Add checkboxes
-        self.heatmapbox = QCheckBox('Live heatmap')
-        settings.addWidget(self.heatmapbox);
-        if self.sv.make_heatmap: self.heatmapbox.toggle()
-        self.logbox = QCheckBox('Log to file')
-        settings.addWidget(self.logbox); 
-        if self.sv.log: self.logbox.toggle()
+        parent.heatmapbox = QCheckBox('Live heatmap')
+        settings.addWidget(parent.heatmapbox);
+        if sv.make_heatmap: parent.heatmapbox.toggle()
+        parent.logbox = QCheckBox('Log to file')
+        settings.addWidget(parent.logbox); 
+        if sv.log: parent.logbox.toggle()
         # Add logging names
-        self.filebox = addQLineEdit(settings, "File name:", self.sv.filename)
-        self.groupbox = addQLineEdit(settings, "Group name:", self.sv.groupname)
+        parent.filebox = addQLineEdit(settings, "File name:", sv.filename)
+        parent.groupbox = addQLineEdit(settings, "Group name (notes):", sv.groupname)
         
         # Add another horizontal bar, for x-scanner related text boxes
         xparams = QHBoxLayout()
-        singleScan.addLayout(xparams)
+        layout.addLayout(xparams)
         # Add text boxes and labels
-        self.lowerxbox = addVdtQLineEdit(xparams, "Lower Vx", self.sv.lowerV, self.sv.upperV, self.sv.lowervx)
-        self.upperxbox = addVdtQLineEdit(xparams, "Upper Vx", self.sv.lowerV, self.sv.upperV, self.sv.uppervx)
-        self.xstepbox = addVdtQLineEdit(xparams, "x-steps", 2, None, self.sv.xsteps, False)
+        parent.lowerxbox = addVdtQLineEdit(xparams, "Lower Vx", sv.lowerV, sv.upperV, sv.lowervx)
+        parent.upperxbox = addVdtQLineEdit(xparams, "Upper Vx", sv.lowerV, sv.upperV, sv.uppervx)
+        parent.xstepbox = addVdtQLineEdit(xparams, "x-steps", 2, None, sv.xsteps, False)
         
         # Add another horizontal bar, for y-scanner related text boxes
         yparams = QHBoxLayout()
-        singleScan.addLayout(yparams)
+        layout.addLayout(yparams)
         # Add text boxes and labels
-        self.lowerybox = addVdtQLineEdit(yparams, "Lower Vy", self.sv.lowerV, self.sv.upperV, self.sv.lowervx)
-        self.upperybox = addVdtQLineEdit(yparams, "Upper Vy", self.sv.lowerV, self.sv.upperV, self.sv.uppervx)
-        self.ystepbox = addVdtQLineEdit(yparams, "y-steps", 2, None, self.sv.xsteps, False)
+        parent.lowerybox = addVdtQLineEdit(yparams, "Lower Vy", sv.lowerV, sv.upperV, sv.lowervx)
+        parent.upperybox = addVdtQLineEdit(yparams, "Upper Vy", sv.lowerV, sv.upperV, sv.uppervx)
+        parent.ystepbox = addVdtQLineEdit(yparams, "y-steps", 2, None, sv.xsteps, False)
         
         # Add another horizontal bar, for general text boxes
         params = QHBoxLayout()
-        singleScan.addLayout(params)
+        layout.addLayout(params)
         # Add text boxes and labels
-        self.settlebox = addVdtQLineEdit(params, "Settle time (s)", 0.001, None, 0.5)
-        self.ratebox = addVdtQLineEdit(params, "Data rate (Hz)", 1, 10000, 100)
-        self.refreshbox = addVdtQLineEdit(params, "Graph refresh rate (s)", 0.01, 5, 1)
-
-    # Extension of __init__ that creates the menu for programmed scans in the QStackedLayout
-    def __makeProgrammedScanMenu(self):
-        programmedScan = QVBoxLayout()
-        self.programmedWidget = QWidget(); self.programmedWidget.setLayout(programmedScan); self.menu.addWidget(self.programmedWidget)
-        
-        # Make a bar for the file selection
-        file = QHBoxLayout()
-        programmedScan.addLayout(file)
-        # Add button and text box
-        self.jsonbox = addQLineEdit(file, "JSON:")
-        self.jsonbox.setReadOnly(True)
-        fileButton = addQBtn(file, '', self.__openJSONFileDialog)
-        fileButton.setIcon(QIcon('Icons/folder-horizontal-open.png'))
-        fileButton.setIconSize(QSize(16, 16))
-        
-        programmedScan.addWidget(QLabel("Current scan info (if a scan is running):"))
-        
-        # Make a bar for info on current scan
-        xyinfo = QHBoxLayout()
-        programmedScan.addLayout(xyinfo)
-        # Add QLabels
-        self.xlabel = QLabel(""); xyinfo.addWidget(self.xlabel)
-        self.ylabel = QLabel(""); xyinfo.addWidget(self.ylabel)
-        
-        # Make a bar for info on current scan
-        info = QHBoxLayout()
-        programmedScan.addLayout(info)
-        # Add QLabels
-        self.timinglabel = QLabel(""); info.addWidget(self.timinglabel)
-        self.storagelabel = QLabel(""); info.addWidget(self.storagelabel)
+        parent.settlebox = addVdtQLineEdit(params, "Settle time (s)", 0.001, None, 0.5)
+        parent.ratebox = addVdtQLineEdit(params, "Data rate (Hz)", 1, 10000, 100)
+        parent.refreshbox = addVdtQLineEdit(params, "Graph refresh rate (s)", 0.01, 5, 1)
 
     # Extension of __init__ for making the grahs
-    def __makeGraphs(self):
+    def __makeGraphs(self, stretchFactor):
         # Set graphical window for putting graphs in
         graphs = pg.GraphicsLayoutWidget()
-        self.addWidget(graphs)
+        self.addWidget(graphs, stretchFactor)
         
         # Enable antialiasing for prettier plots
         pg.setConfigOptions(antialias=True)
         
         # Prepare actual plots
         self.p1 = graphs.addPlot(title="Strain vs applied voltage", row = 0, col = 0)
-        self.p1.setLabel('bottom', "Voltage (amplifier*V)"); self.p1.setLabel('left', "Strain (100 µV)")
-        self.p2 = graphs.addPlot(title="Averaged strain vs applied voltage (100 µV)", row = 0, col = 1)
+        self.p1.setLabel('bottom', "Voltage (amplifier*V)"); self.p1.setLabel('left', "Strain (mV)")
+        self.p2 = graphs.addPlot(title="Averaged strain vs applied voltage (mV)", row = 0, col = 1)
         
         # Give lines fancy colours
         self.curve1 = self.p1.plot(pen=None, symbol='o', symbolPen=pg.mkPen(color='y', width=1), symbolBrush=None)
@@ -223,61 +191,45 @@ class scanUI(TabLayout, QVBoxLayout):
         self.image = pg.ImageItem(image=self.surface)
         self.p2.addItem(self.image, axisOrder='row-major')
         self.colorbar = self.p2.addColorBar(self.image, colorMap=pg.colormap.get('CET-D1'), interactive=False)
-    
-    # Opens a dialog for selecting a JSON file
-    def __openJSONFileDialog(self):
-        file, _ = QFileDialog.getOpenFileName(self.widget, "Open a JSON program file", "", "JSON files (*.json);;All files (*)")
-        if file:
-            self.jsonbox.setText(file)
-
-    # Switch the QStackedLayouts to show the single scan menu
-    def __switchSingle(self):
-        self.widget.switchTab()
-        self.menu.setCurrentWidget(self.singleWidget)
-    
-    # Switch the QStackedLayouts to show the programmed scan menu
-    def __switchProgrammed(self):
-        self.widget.switchTab()
-        self.menu.setCurrentWidget(self.programmedWidget)
 
     # Handles the starting of a line scan
-    def __startLineScan(self):
-        if not self.line_scan.isRunning():
-            print('Creating line scanning thread from {}'.format(threading.get_ident()))
-            
-            # Clear the current heatmap
-            self.surface = np.zeros((1,1))
-            self.image.setImage(self.surface)
-            
-            # If this is a single scan
-            if self.program_i == -1:
-                # Update variables and settings according to current snapshot
-                self.__snapshot()
-            else:
-                # Update variables and settings according to current .json information
-                self.sv.set_all(**self.program[self.program_i])
-                self.__updateProgramText()
-            self.graph_timer.setInterval(int(self.sv.refresh * 1000))
-            # Calculate what voltage steps to take
-            self.sv.stepdata()
-            
-            # Set the plot to have a fixed x-range            
-            self.p1.setXRange(self.sv.lowervx, self.sv.uppervx)
-            
-            # Set up a task for reading from the DAQ and configure logging settings. Don't start it yet.
-            self.read_task = self.daq.make_read_task('read', self.meas_list)
-            NIpci6036E.set_continuous_hardware_clock(self.read_task, self.sv.data_rate)
-            NIpci6036E.commit(self.read_task)
-            if self.sv.log:
-                NIpci6036E.set_log(self.read_task, self.sv.createFileName(), self.sv.createGroupName())
-            
-            # Start a new line scan
-            self.line_scan.start()
-            # Start updating graphs
-            self.graph_timer.start()
-            # Keep track of what y-line we are on
-            self.i = 1
-            self.doc.setText('Scanning {}/{}...'.format(self.i, len(self.sv.liny)))
+    def startLineScan(self, settings=None):
+        print('Creating line scanning thread from {}'.format(threading.get_ident()))
+        
+        # Clear the current heatmap
+        self.surface = np.zeros((1,1))
+        self.image.setImage(self.surface)
+        
+        # If this is a single scan
+        if settings is None:
+            # Find settings from current snapshot
+            settings = scanUI.snapshot(self)
+        # Update variables and settings according to settings information
+        self.sv.set_all(**settings)
+        
+        self.sv.archive()
+        
+        self.graph_timer.setInterval(int(self.sv.refresh * 1000))
+        # Calculate what voltage steps to take
+        self.sv.stepdata()
+        
+        # Set the plot to have a fixed x-range            
+        self.p1.setXRange(self.sv.lowervx, self.sv.uppervx)
+        
+        # Set up a task for reading from the DAQ and configure logging settings. Don't start it yet.
+        self.read_task = self.daq.make_read_task('read', self.meas_list)
+        NIpci6036E.set_continuous_hardware_clock(self.read_task, self.sv.data_rate)
+        NIpci6036E.commit(self.read_task)
+        if self.sv.log:
+            NIpci6036E.set_log(self.read_task, self.sv.createFileName(), self.sv.createGroupName())
+        
+        # Start a new line scan
+        self.line_scan.start()
+        # Start updating graphs
+        self.graph_timer.start()
+        # Keep track of what y-line we are on
+        self.i = 1
+        self.doc.setText('Scanning {}/{}...'.format(self.i, len(self.sv.liny)))
     
     # Fires when a line scan thread stops, and does closing things
     def __lineScanClosing(self):
@@ -287,48 +239,18 @@ class scanUI(TabLayout, QVBoxLayout):
             self.update_scan_plots()                   # Note that this USES THE READ_TASK!
             NIpci6036E.close_task(self.read_task)      # So stop it only AFTER the last update
             self.line_scan.done = False
-            # Am I in a single scan?
-            if self.program_i == -1:
-                self.startButton.setEnabled(True)
-                self.parent.enableTabs()
-            else:
-                # Was this the last scan of the program?
-                if self.program_i == len(self.program) - 1:
-                    # Do closing stuff
-                    self.program_i = -1
-                    self.__clearProgramText()
-                    self.startButton.setEnabled(True)
-                    self.parent.enableTabs()
-                else:
-                    # Start the next scan
-                    self.program_i += 1
-                    self.__startLineScan()
-        else:
-            self.startButton.setEnabled(True)
-            self.parent.enableTabs()
-
+            self.advance.emit()
         # Update UI
+        self.startButton.setEnabled(True)
+        self.parent.enableTabs()
         self.doc.setText('No active scan.')
         self.curve1.clear()
+        self.curve2.clear()
     
-    # Start the execution of a JSON file
     def __startProgram(self):
-        # Did I start a single scan?
-        if self.menu.currentIndex() == 0:
-            self.parent.disableTabs(self.tabs)
-            self.startButton.setEnabled(False)
-            self.__startLineScan()
-        else:
-            # Check whether the .json exists, then read it
-            if os.path.isfile(self.jsonbox.text()):
-                with open(self.jsonbox.text(), 'r') as file:
-                    self.program = json.load(file)
-                self.program_i = 0
-                self.parent.disableTabs(self.tabs)
-                self.startButton.setEnabled(False)
-                self.__startLineScan()
-            else:
-                self.doc.setText("No valid file selected!")
+        self.parent.disableTabs(self.tabs)
+        self.startButton.setEnabled(False)
+        self.startLineScan()
     
     # Data acquisition and concatenation
     def __acquire_data(self):
@@ -337,20 +259,13 @@ class scanUI(TabLayout, QVBoxLayout):
     # Handle updating the plots
     def update_scan_plots(self):
         self.__acquire_data()
-        
-        # print(len(self.sv.linx))
-        # print(len(self.data[0]))
-        # print(np.shape(self.data)[1])
-        # Did we reach a full line?
+
         if np.shape(self.data)[1] > len(self.sv.linx):
             self.__updateHeatmap()
         
         # Update plots
         hlinxlen = int(len(self.sv.linx)/2)
         
-        # print(hlinxlen)
-        # print(len(self.data[0]))
-        # print(np.shape(self.data)[1])
         # Split the data over a forward curve and a backward curve, if we started the backward curve
         if np.shape(self.data)[1] < hlinxlen:
             self.curve1.setData(self.sv.linx[:len(self.data[0])], self.data[0])
@@ -408,38 +323,23 @@ class scanUI(TabLayout, QVBoxLayout):
             self.data = self.data[:, chunk:np.shape(self.data)[1]]
             return temp
     
-    # Update variables by taking a snapshot of current values in widget
-    def __snapshot(self):
-        self.sv.lowervx = float(self.lowerxbox.text())
-        self.sv.uppervx = float(self.upperxbox.text())
-        self.sv.xsteps = int(self.xstepbox.text())
-        self.sv.lowervy = float(self.lowerybox.text())
-        self.sv.uppervy = float(self.upperybox.text())
-        self.sv.ysteps = int(self.ystepbox.text())
-        self.sv.settle = float(self.settlebox.text())
-        self.sv.data_rate = float(self.ratebox.text())
-        self.sv.refresh = float(self.refreshbox.text())
-        self.sv.make_heatmap = self.heatmapbox.isChecked()
-        self.sv.log = self.logbox.isChecked()
-        self.sv.filename = self.filebox.text()
-        self.sv.groupname = self.filebox.text()
-
-    # Update the UI to reflect the current scan of a programmed scan
-    def __updateProgramText(self):
-        self.xlabel.setText("x voltage: {}V to {}V in {} steps".format(self.sv.lowervx, self.sv.uppervx, self.sv.xsteps))
-        self.ylabel.setText("y voltage: {}V to {}V in {} steps".format(self.sv.lowervy, self.sv.uppervy, self.sv.ysteps))
-        self.timinglabel.setText("Timings: settle {}s, data rate {}Hz, readout and update interval {}s".format(self.sv.settle, self.sv.data_rate, self.sv.refresh))
-        if self.sv.log:
-            self.storagelabel.setText("Log to file '{}' as group '{}'".format(self.sv.createFileName(), self.sv.createGroupName()))
-        else:
-            self.storagelabel.setText("No logging enabled")
-    
-    # Update the UI to reflect the lack of a current programmed scan
-    def __clearProgramText(self):
-        self.xlabel.setText('')
-        self.ylabel.setText('')
-        self.timinglabel.setText('')
-        self.storagelabel.setText('')
+    # Make a dictionary of variables by taking a snapshot of current values in widget
+    def snapshot(layout):
+        values = {}
+        values["lowervx"] = float(layout.lowerxbox.text())
+        values["uppervx"] = float(layout.upperxbox.text())
+        values["xsteps"] = int(layout.xstepbox.text())
+        values["lowervy"] = float(layout.lowerybox.text())
+        values["uppervy"] = float(layout.upperybox.text())
+        values["ysteps"] = int(layout.ystepbox.text())
+        values["settle"] = float(layout.settlebox.text())
+        values["data_rate"] = float(layout.ratebox.text())
+        values["refresh"] = float(layout.refreshbox.text())
+        values["make_heatmap"] = layout.heatmapbox.isChecked()
+        values["log"] = layout.logbox.isChecked()
+        values["filename"] = layout.filebox.text()
+        values["groupname"] = layout.filebox.text()
+        return values
 
     # Stop all active processes in a way where nothing breaks
     def stopAll(self):
@@ -462,7 +362,7 @@ class ScanLineThread(QThread):
         self.win = win
         self.done = False               # For figuring out whether I was terminated or gracefully ended
         self.daq = daq
-        
+
     # Start a line scan
     def run(self):
         print('Line scanning thread {}'.format(threading.get_ident()))
