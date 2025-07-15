@@ -1,47 +1,103 @@
 [
     {
-        "lowervx": 0,
-        "uppervx": 7,
-        "lowervy": 0,
-        "uppervy": 0,
-        "xsteps": 35,
-        "ysteps": 100,
+        "threshold": [
+            -5e-07,
+            -1e-08
+        ],
+        "stepcounts": [
+            1000,
+            200
+        ],
+        "voltages": [
+            12,
+            12
+        ],
+        "frequencies": [
+            200,
+            50
+        ],
+        "approach_stages": 2,
+        "rate": 10.0,
+        "consec_req": 3,
+        "log": false,
+        "category": "approach"
+    },
+    {
+        "lowervx": 0.0,
+        "uppervx": 7.0,
+        "xsteps": 21,
+        "lowervy": 0.0,
+        "uppervy": 7.0,
+        "ysteps": 21,
         "settle": 0.5,
-        "data_rate": 100,
-        "refresh": 0.5,
-        "log": true,
+        "data_rate": 100.0,
+        "refresh": 1.0,
         "make_heatmap": true,
-        "filename": "settle-test-0.5",
-        "groupname": ""
+        "log": true,
+        "filename": "",
+        "groupname": "",
+        "category": "scan"
     },
     {
-        "lowervx": 0,
-        "uppervx": 7,
-        "lowervy": 0,
-        "uppervy": 0,
-        "xsteps": 35,
-        "ysteps": 100,
-        "settle": 1,
-        "data_rate": 100,
-        "refresh": 0.5,
-        "log": true,
+        "lowervx": 0.0,
+        "uppervx": 7.0,
+        "xsteps": 21,
+        "lowervy": 0.0,
+        "uppervy": 7.0,
+        "ysteps": 21,
+        "settle": 1.0,
+        "data_rate": 100.0,
+        "refresh": 1.0,
         "make_heatmap": true,
-        "filename": "settle-test-1.0",
-        "groupname": ""
+        "log": true,
+        "filename": "",
+        "groupname": "",
+        "category": "scan"
     },
     {
-        "lowervx": 0,
-        "uppervx": 7,
-        "lowervy": 0,
-        "uppervy": 0,
-        "xsteps": 35,
-        "ysteps": 100,
+        "lowervx": 0.0,
+        "uppervx": 7.0,
+        "xsteps": 21,
+        "lowervy": 0.0,
+        "uppervy": 7.0,
+        "ysteps": 21,
         "settle": 1.5,
-        "data_rate": 100,
-        "refresh": 0.5,
-        "log": true,
+        "data_rate": 100.0,
+        "refresh": 1.0,
         "make_heatmap": true,
-        "filename": "settle-test-1.5",
-        "groupname": ""
+        "log": true,
+        "filename": "",
+        "groupname": "",
+        "category": "scan"
+    },
+    {
+        "axis": 0,
+        "steps": 100,
+        "volt": 12,
+        "freq": 1000,
+        "category": "step"
+    },
+    {
+        "axis": 1,
+        "steps": 100,
+        "volt": 12,
+        "freq": 1000,
+        "category": "step"
+    },
+    {
+        "lowervx": 0.0,
+        "uppervx": 7.0,
+        "xsteps": 21,
+        "lowervy": 0.0,
+        "uppervy": 7.0,
+        "ysteps": 21,
+        "settle": 0.5,
+        "data_rate": 1000.0,
+        "refresh": 1.0,
+        "make_heatmap": true,
+        "log": true,
+        "filename": "",
+        "groupname": "",
+        "category": "scan"
     }
 ]

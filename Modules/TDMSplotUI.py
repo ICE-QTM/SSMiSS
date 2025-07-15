@@ -2,12 +2,12 @@
 """
 SSMiSS module for post-processing of .tdms files.
 
-Version 1.0.1 (2025/04/25)
+Version 1.1.1 (2025/05/07)
 Kylian van Dam - Master Student at ICE/QTM
 University of Twente
 """
 
-from pyqtgraph.Qt.QtWidgets import QVBoxLayout, QHBoxLayout, QLabel, QComboBox, QFileDialog
+from pyqtgraph.Qt.QtWidgets import QVBoxLayout, QHBoxLayout, QComboBox, QFileDialog, QFormLayout, QLabel
 from pyqtgraph.Qt.QtCore import QSize, QThread
 from pyqtgraph.Qt.QtGui import QIcon
 import nptdms as npt
@@ -17,7 +17,7 @@ import pyqtgraph as pg
 from os import path
 
 from Modules.TabLayout import TabLayout
-from utils import addQLineEdit, addVdtQLineEdit, addQBtn, stepData
+from utils import addQLineEdit, addVdtQLineEdit, addQBtn, stepData, addHLine
 
 
 #%% Defaults and standards (most of which can be freely changed at runtime), packed in one neat class
@@ -66,42 +66,54 @@ class TDMSplotUI(TabLayout, QVBoxLayout):
         self.win = QHBoxLayout()
         self.addLayout(self.win)
         
-        self.__makeUI()
-        self.__makeGraphs()
+        self.__makeUI(35)
+        self.__makeGraphs(65)
     
     # Extension of __init__
-    def __makeUI(self):
-        control = QVBoxLayout(); self.win.addLayout(control)
+    def __makeUI(self, stretchFactor):
+        control = QVBoxLayout(); self.win.addLayout(control, stretchFactor)
         
-        # Add a button to covert groups to csv
-        self.groupnamebox = addQLineEdit(control, "Conversion file suffix: ")
+        addHLine(control, 10)
+        
+        f1 = QFormLayout(); control.addLayout(f1)
+        
+        self.groupbox = QComboBox()
+        self.groupbox.activated.connect(self.__groupChange)
+        f1.addRow("Group:", self.groupbox)
+        
+        # Add a button to convert groups to csv
+        self.groupnamebox = addQLineEdit(f1, "Conversion file suffix: ")
         self.convertButton = addQBtn(control, 'Convert group to csv', self.__convert)
         self.convertButton.setFixedSize(180, 23)
         
-        # Add a combobox to select the group
-        control.addWidget(QLabel('Group:'))
-        self.groupbox = QComboBox(); control.addWidget(self.groupbox)
-        # When the selected group changes, fire a function to update the channel combobox
-        self.groupbox.activated.connect(self.__groupChange)
+        addHLine(control, 10)
+        
+        f2 = QFormLayout(); control.addLayout(f2)
         
         # Add a combobox to select the channel
-        control.addWidget(QLabel('Channel:'))
-        self.chanbox = QComboBox(); control.addWidget(self.chanbox)
+        self.chanbox = QComboBox();
+        f2.addRow("Channel:", self.chanbox)
         
         # Add more fields to enter values
-        self.skipbox = addVdtQLineEdit(control, 'Skip fraction:', 0, 1, 0)
-        self.lybox = addVdtQLineEdit(control, 'Starting y:', 0, None, 0, False)
-        self.uybox = addVdtQLineEdit(control, 'Ending y:', 0, None, 0, False)
+        self.skipbox = addVdtQLineEdit(f2, 'Skip fraction:', 0, 1, 0)
+        self.lybox = addVdtQLineEdit(f2, 'Starting y:', 0, None, 0, False)
+        self.uybox = addVdtQLineEdit(f2, 'Ending y:', 0, None, 0, False)
         
         # Add a button to start the analysis
         self.startButton = addQBtn(control, 'Start analysis', self.__calculate)
         self.startButton.setFixedSize(140, 23)
+        
+        addHLine(control, 10)
+        
+        self.label = QLabel(""); control.addWidget(self.label)
+        
+        control.addStretch()
     
     # Extension of __init__
-    def __makeGraphs(self):
+    def __makeGraphs(self, stretchFactor):
         # Make actual plots
         plot = pg.GraphicsLayoutWidget()
-        self.win.addWidget(plot)
+        self.win.addWidget(plot, stretchFactor)
         
         pg.setConfigOptions(antialias=True)
         
@@ -149,6 +161,9 @@ class TDMSplotUI(TabLayout, QVBoxLayout):
         self.rangesf = rangesf
         self.rangesb = rangesb
         self.difference = self.imagef - self.imageb
+        
+    def display(self, text):
+        self.label.setText(text)
     
     # Opens a dialog for selecting a JSON file
     def __openTDMSFileDialog(self):
@@ -214,10 +229,12 @@ class MakeCSVThread(QThread):
         csv = self.tv.file[:-5] + self.tv.suffix + ".csv"
         # Only do anything if the requested filename does not exist
         if path.exists(csv):
-            print("File already exists. Conversion aborted.")
-        else:    
+            self.plotUI.display("File already exists. Conversion aborted.")
+        else:
+            self.plotUI.display("Opening file...")
             # Open the tdms
             with npt.TdmsFile.open(self.tv.file) as tdms:
+                self.plotUI.display("Converting data......")
                 # Get the correct group
                 group = tdms.groups()[self.tv.group]
                 # Turn it into a pandas dataframe, also turn the index column into an actual column since it is our time column and we want it printed
@@ -246,9 +263,10 @@ class MakeCSVThread(QThread):
                 
                 # Create a header compatible with QTMplot/qtmimport
                 head = np.datetime_as_string(group.channels()[0].properties["wf_start_time"]) + '|sssgg\n' + group.name + '\n' + ', '.join(df.columns)
+            self.plotUI.display("Exporting...")
             # Write everything to the file
             np.savetxt(csv, df, delimiter=', ', newline='\n', header = head, comments = '', fmt='%g')
-
+            self.plotUI.display("Conversion successfull!")
         self.plotUI.startButton.setEnabled(True)
         self.plotUI.convertButton.setEnabled(True)
 
@@ -261,7 +279,7 @@ class HeatmappifyThread(QThread):
         self.tv = tdmsVars
     
     def run(self):
-        print("Opening file...")
+        self.plotUI.display("Opening file...")
         with npt.TdmsFile.open(self.tv.file) as tdms:
             # Find the desired group and channel
             group = tdms.groups()[self.tv.group]
@@ -286,7 +304,7 @@ class HeatmappifyThread(QThread):
             repeats = int(settle * data_rate)
             skip = int(self.tv.skip * repeats)
             
-            print("Making heatmaps...")
+            self.plotUI.display("Making heatmaps...")
             linef = np.zeros((0))
             lineb = np.zeros((0))
             # Calculate the first line
@@ -310,16 +328,16 @@ class HeatmappifyThread(QThread):
                         linef = np.append(linef, channel[i * len(linx) + j * repeats + skip:i * len(linx) + (j+1) * repeats].mean())
                 imagef = np.append(imagef, np.atleast_2d(linef).T, 1)
                 imageb = np.append(imageb, np.atleast_2d(np.flip(lineb)).T, 1)
-            # Convert from units of 100 µV to units of µV
-            imagef = imagef * 100
-            imageb = imageb * 100
+            # Convert from units of mV to units of µV
+            imagef = imagef * 1000
+            imageb = imageb * 1000
 
-            print("Gathering more data insights...")
+            self.plotUI.display("Gathering more data insights...")
             # Do some additional processing
             start = channel.properties["wf_start_time"]
             end = start + np.timedelta64(int(len(linx) * len(liny) / data_rate), 's')
             span = HeatmappifyThread.__timedelta64_to_str(end - start)
-            print("Start time: {}\nEnd time: {}\nExecution time: {}".format(start, end, span))
+            result = "Start time: {}\nEnd time: {}\nExecution time: {}\n".format(start, end, span)
 
         # Crop
         if self.tv.yend == 0: yend = np.shape(imagef)[1]
@@ -331,9 +349,10 @@ class HeatmappifyThread(QThread):
         driftf = np.asarray([np.min(x) - np.max(x) for x in imagef])
         rangesb = np.asarray([x(xsteps-1)-x(0) for x in [P.fit(range(0, xsteps), x, 1, []) for x in imageb.T]])
         driftb = np.asarray([np.min(x) - np.max(x) for x in imageb])
-        print("Average horizontal range: {} and {}".format(np.mean(rangesf), np.mean(rangesb)))
-        print("Average maximal drift: {} and {}".format(np.mean(driftf), np.mean(driftb)))
-        print("Maximal difference: {}".format(np.max(np.abs(difference))))
+        result += "Average horizontal range: {} and {}\n".format(np.mean(rangesf), np.mean(rangesb))
+        result += "Average maximal drift: {} and {}\n".format(np.mean(driftf), np.mean(driftb))
+        result += "Maximal difference: {}".format(np.max(np.abs(difference)))
+        self.plotUI.display(result)
         
         # Hand the data to the main class
         self.plotUI.setData(imagef, imageb, rangesf, rangesb)
